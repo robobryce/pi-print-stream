@@ -2,7 +2,8 @@
 // child argv construction (prompt dedup, flag stripping, passthrough).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { flagOn, swallowedPrompt, buildChildArgs } from "../src/extension.ts";
+import { fileURLToPath } from "node:url";
+import { flagOn, swallowedPrompt, buildChildArgs, resolveChildSpawn } from "../src/extension.ts";
 
 test("flagOn treats boolean/truthy strings as on", () => {
 	assert.equal(flagOn(true), true);
@@ -61,4 +62,37 @@ test("buildChildArgs: passes through -e / arbitrary flags", () => {
 // live (forced-error → nonzero exit; SIGTERM → child killed via process signal
 // handlers). They aren't unit-tested here because they require a real subprocess
 // and signal delivery; buildChildArgs/flagOn/swallowedPrompt above cover the
-// pure logic.
+// pure logic. resolveChildSpawn (the [cmd, args] decision inside runChild) is
+// pure and tested below.
+
+const SELF = fileURLToPath(new URL("../src/extension.ts", import.meta.url)); // exists on disk
+const CHILD_ARGS = ["--mode", "json", "-p", "PROMPT"];
+
+test("resolveChildSpawn: real script → node <script> <args>", () => {
+	assert.deepEqual(resolveChildSpawn("/usr/bin/node", SELF, CHILD_ARGS), [
+		"/usr/bin/node",
+		[SELF, ...CHILD_ARGS],
+	]);
+});
+
+test("resolveChildSpawn: bunfs virtual script → pi on PATH, no bogus prompt", () => {
+	const args = [...CHILD_ARGS];
+	assert.deepEqual(resolveChildSpawn("/usr/local/bin/bun", "/$bunfs/root/pi", args), [
+		"pi",
+		args,
+	]);
+});
+
+test("resolveChildSpawn: missing cli path → pi on PATH", () => {
+	assert.deepEqual(resolveChildSpawn("/usr/bin/node", "/nonexistent/pi", CHILD_ARGS), [
+		"pi",
+		CHILD_ARGS,
+	]);
+});
+
+test("resolveChildSpawn: no cli at all → pi on PATH", () => {
+	assert.deepEqual(resolveChildSpawn("/usr/bin/node", undefined, CHILD_ARGS), [
+		"pi",
+		CHILD_ARGS,
+	]);
+});

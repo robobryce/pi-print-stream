@@ -141,11 +141,32 @@ export function makeRenderer() {
  * with the child's exit code. Uses this process's own node+cli entry so it
  * doesn't depend on `pi` being on PATH.
  */
+
+/**
+ * Resolve [cmd, args] for spawning the child pi.
+ *
+ * When pi runs as a Bun-compiled single-file executable, process.argv[1] is the
+ * virtual path `/$bunfs/root/pi` (bunfs), which only exists inside the running
+ * binary. Passing it to the child as a script argument makes the child pi treat
+ * it as the first positional user message (e.g. `pi -p "hello" --stream` would
+ * silently become a prompt of `/$bunfs/root/pi`). In that case — and whenever
+ * the cli path is not a real file — fall back to `pi` on PATH.
+ */
+export function resolveChildSpawn(
+	nodeBin: string,
+	cli: string | undefined,
+	childArgs: string[],
+): [string, string[]] {
+	const isBunVirtualScript = cli?.startsWith("/$bunfs/root/");
+	if (cli && !isBunVirtualScript && fs.existsSync(cli)) {
+		return [nodeBin, [cli, ...childArgs]];
+	}
+	return ["pi", childArgs];
+}
+
 function runChild(childArgs: string[]): Promise<number> {
 	return new Promise((resolve) => {
-		const nodeBin = process.execPath;
-		const cli = process.argv[1];
-		const [cmd, args] = cli ? [nodeBin, [cli, ...childArgs]] : ["pi", childArgs];
+		const [cmd, args] = resolveChildSpawn(process.execPath, process.argv[1], childArgs);
 		const child = spawn(cmd, args, {
 			env: { ...process.env, [CHILD_GUARD]: "1" },
 			stdio: ["ignore", "pipe", "inherit"],
